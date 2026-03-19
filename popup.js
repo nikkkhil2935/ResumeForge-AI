@@ -429,32 +429,45 @@ async function callOpenAI(resume, jd, apiKey) {
 // Groq
 async function callGroq(resume, jd, apiKey) {
   const prompt = buildPrompt(resume, jd);
-  const response = await fetch(
-    'https://api.groq.com/openai/v1/chat/completions',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'mixtral-8x7b-32768',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: 8192,
-      }),
-    }
-  );
+  const groqModels = [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+  ];
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `HTTP ${response.status}`);
+  let lastError = 'Unknown Groq API error';
+  for (const model of groqModels) {
+    const response = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: 8192,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      lastError = err?.error?.message || `HTTP ${response.status}`;
+      // Retry with the next model for deprecations/unsupported model errors.
+      if (response.status === 400 || response.status === 404) continue;
+      throw new Error(lastError);
+    }
+
+    const data = await response.json();
+    const rawText = data?.choices?.[0]?.message?.content || '';
+    const cleaned = rawText.replace(/```json|```/g, '').trim();
+    return JSON.parse(cleaned);
   }
 
-  const data = await response.json();
-  const rawText = data?.choices?.[0]?.message?.content || '';
-  const cleaned = rawText.replace(/```json|```/g, '').trim();
-  return JSON.parse(cleaned);
+  throw new Error(lastError);
 }
 
 // Anthropic Claude
