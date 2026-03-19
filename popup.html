@@ -33,12 +33,15 @@
 
   <!-- ── API KEY PANEL ── -->
   <div class="api-panel" id="apiPanel">
-    <label class="field-label">Groq API Key</label>
+    <label class="field-label">
+      Gemini API Key —
+      <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent);text-decoration:none;">Get free key ↗</a>
+    </label>
     <div class="api-input-row">
-      <input type="password" id="apiKey" placeholder="gsk_..." class="api-input" />
+      <input type="password" id="apiKey" placeholder="AIza..." class="api-input" />
       <button class="save-btn" id="saveKey">Save</button>
     </div>
-    <p class="hint-text">🔒 Stored locally — never sent anywhere except Groq.</p>
+    <p class="hint-text">🆓 Gemini Flash is <strong style="color:var(--green)">completely free</strong> — no credit card needed.</p>
     <div class="api-status" id="apiStatus"></div>
   </div>
 

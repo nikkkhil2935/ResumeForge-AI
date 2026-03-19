@@ -1,6 +1,6 @@
 /* ── ResumeForge AI — popup.js ── */
 
-// ─── STATE ─────────────────────────────────────────────────────────────────
+// ─── STATE ───────────────────────────────────────────────────────────────────
 const state = {
   resumeText: '',
   jdText: '',
@@ -8,8 +8,9 @@ const state = {
   scrapedJD: '',
   apiKey: '',
 };
+let _lastStructuredResume = null;
 
-// ─── DOM REFS ───────────────────────────────────────────────────────────────
+// ─── DOM REFS ────────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 const settingsToggle  = $('settingsToggle');
 const apiPanel        = $('apiPanel');
@@ -39,13 +40,14 @@ const errorMsg        = $('errorMsg');
 const resultSection   = $('resultSection');
 const atsBadge        = $('atsBadge');
 const copyBtn         = $('copyBtn');
+const exportPdfBtn    = $('exportPdfBtn');
 const resultText      = $('resultText');
 const analysisCards   = $('analysisCards');
 const resultTabs      = document.querySelectorAll('.result-tab');
 const resumePane      = $('resumePane');
 const analysisPane    = $('analysisPane');
 
-// ─── INIT ───────────────────────────────────────────────────────────────────
+// ─── INIT ────────────────────────────────────────────────────────────────────
 async function init() {
   const stored = await chrome.storage.local.get(['apiKey']);
   if (stored.apiKey) {
@@ -57,15 +59,13 @@ async function init() {
 }
 init();
 
-// ─── SETTINGS TOGGLE ────────────────────────────────────────────────────────
-settingsToggle.addEventListener('click', () => {
-  apiPanel.classList.toggle('visible');
-});
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+settingsToggle.addEventListener('click', () => apiPanel.classList.toggle('visible'));
 
 saveKeyBtn.addEventListener('click', async () => {
   const key = apiKeyInput.value.trim();
-  if (!key.startsWith('gsk_')) {
-    apiStatus.textContent = '✗ Groq key must start with gsk_';
+  if (!key.startsWith('AIza')) {
+    apiStatus.textContent = '✗ Gemini key must start with AIza';
     apiStatus.className = 'api-status err';
     return;
   }
@@ -80,25 +80,16 @@ uploadZone.addEventListener('click', (e) => {
   if (e.target === removeFileBtn || removeFileBtn.contains(e.target)) return;
   resumeFileInput.click();
 });
-
-uploadZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  uploadZone.classList.add('dragging');
-});
-
+uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('dragging'); });
 uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragging'));
-
 uploadZone.addEventListener('drop', (e) => {
   e.preventDefault();
   uploadZone.classList.remove('dragging');
-  const file = e.dataTransfer.files[0];
-  if (file) handleFile(file);
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
 });
-
 resumeFileInput.addEventListener('change', () => {
   if (resumeFileInput.files[0]) handleFile(resumeFileInput.files[0]);
 });
-
 removeFileBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   state.resumeText = '';
@@ -108,14 +99,8 @@ removeFileBtn.addEventListener('click', (e) => {
 });
 
 async function handleFile(file) {
-  if (!file.name.endsWith('.pdf')) {
-    showError('Please upload a PDF file.');
-    return;
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    showError('File too large. Max 10MB.');
-    return;
-  }
+  if (!file.name.endsWith('.pdf')) { showError('Please upload a PDF file.'); return; }
+  if (file.size > 10 * 1024 * 1024) { showError('File too large. Max 10MB.'); return; }
 
   fileNameEl.textContent = file.name;
   uploadIdle.style.display = 'none';
@@ -125,9 +110,7 @@ async function handleFile(file) {
 
   try {
     const text = await extractPDFText(file);
-    if (!text || text.trim().length < 50) {
-      throw new Error('Could not extract text. Is this a scanned/image PDF?');
-    }
+    if (!text || text.trim().length < 50) throw new Error('Could not extract text. Is this a scanned PDF?');
     state.resumeText = text.trim();
     parsedStatus.textContent = `✓ Parsed — ${state.resumeText.length.toLocaleString()} characters`;
     parsedStatus.className = 'parsed-status ok';
@@ -139,14 +122,10 @@ async function handleFile(file) {
 }
 
 async function extractPDFText(file) {
-  // pdf.mjs sets globalThis.pdfjsLib when loaded as module
   const pdfjs = globalThis.pdfjsLib;
-  if (!pdfjs) {
-    throw new Error('PDF.js not loaded. Make sure lib/pdf.mjs is present.');
-  }
+  if (!pdfjs) throw new Error('PDF.js not loaded. Add lib/pdf.mjs and lib/pdf.worker.mjs');
 
   pdfjs.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('lib/pdf.worker.mjs');
-
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
 
@@ -154,8 +133,7 @@ async function extractPDFText(file) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items.map((item) => item.str).join(' ');
-    fullText += pageText + '\n';
+    fullText += content.items.map((item) => item.str).join(' ') + '\n';
   }
   return fullText;
 }
@@ -163,28 +141,21 @@ async function extractPDFText(file) {
 // ─── JD TABS ─────────────────────────────────────────────────────────────────
 tabBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
-    const tab = btn.dataset.tab;
-    state.activeJdTab = tab;
+    state.activeJdTab = btn.dataset.tab;
     tabBtns.forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    scrapeTab.classList.toggle('hidden', tab !== 'scrape');
-    pasteTab.classList.toggle('hidden', tab !== 'paste');
+    scrapeTab.classList.toggle('hidden', btn.dataset.tab !== 'scrape');
+    pasteTab.classList.toggle('hidden', btn.dataset.tab !== 'paste');
   });
 });
 
-// ─── JD SCRAPE ───────────────────────────────────────────────────────────────
+// ─── SCRAPE JD ───────────────────────────────────────────────────────────────
 scrapeBtn.addEventListener('click', async () => {
   scrapeBtn.disabled = true;
   scrapeBtn.querySelector('span').textContent = 'Scraping...';
-
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    // Try injecting content script first (in case it wasn't injected)
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content.js'],
-    }).catch(() => {}); // ignore if already injected
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }).catch(() => {});
 
     const response = await new Promise((resolve, reject) => {
       chrome.tabs.sendMessage(tab.id, { action: 'scrapeJD' }, (res) => {
@@ -194,9 +165,7 @@ scrapeBtn.addEventListener('click', async () => {
     });
 
     const jd = response?.jd?.trim();
-    if (!jd || jd.length < 50) {
-      throw new Error('No job description found on this page. Try pasting it manually.');
-    }
+    if (!jd || jd.length < 50) throw new Error('No JD found on this page. Try pasting manually.');
 
     state.scrapedJD = jd;
     scrapedPreview.textContent = jd;
@@ -214,7 +183,6 @@ clearScrapeBtn.addEventListener('click', () => {
   scrapedResult.style.display = 'none';
 });
 
-// ─── PASTE JD CHAR COUNT ─────────────────────────────────────────────────────
 jdPaste.addEventListener('input', () => {
   charCount.textContent = jdPaste.value.length.toLocaleString();
 });
@@ -223,9 +191,8 @@ jdPaste.addEventListener('input', () => {
 generateBtn.addEventListener('click', async () => {
   hideError();
 
-  // Validation
   if (!state.apiKey) {
-    showError('Please add your Groq API key (⚙ icon).');
+    showError('Please add your free Gemini API key (⚙ icon). Get one at aistudio.google.com');
     apiPanel.classList.add('visible');
     return;
   }
@@ -234,10 +201,7 @@ generateBtn.addEventListener('click', async () => {
     return;
   }
 
-  const jd = state.activeJdTab === 'scrape'
-    ? state.scrapedJD
-    : jdPaste.value.trim();
-
+  const jd = state.activeJdTab === 'scrape' ? state.scrapedJD : jdPaste.value.trim();
   if (!jd || jd.length < 30) {
     showError('Please provide a job description (scrape or paste).');
     return;
@@ -248,7 +212,7 @@ generateBtn.addEventListener('click', async () => {
   resultSection.classList.add('hidden');
 
   try {
-    const result = await callClaudeAPI(state.resumeText, state.jdText, state.apiKey);
+    const result = await callGeminiAPI(state.resumeText, state.jdText, state.apiKey);
     displayResult(result);
   } catch (err) {
     showError(`API Error: ${err.message}`);
@@ -257,72 +221,122 @@ generateBtn.addEventListener('click', async () => {
   }
 });
 
-// ─── GROQ API CALL ───────────────────────────────────────────────────────────
-async function callClaudeAPI(resume, jd, apiKey) {
-  const systemPrompt = `You are an expert ATS resume optimizer and senior technical recruiter with 10+ years of experience. 
-Your job is to tailor a resume to maximize its ATS (Applicant Tracking System) score for a specific job description.
+// ─── GEMINI API CALL ─────────────────────────────────────────────────────────
+async function callGeminiAPI(resume, jd, apiKey) {
+  const prompt = `You are an expert ATS resume optimizer and senior technical recruiter.
 
-RULES:
-1. NEVER fabricate experience, skills, or credentials not present in the original resume
-2. Rephrase bullet points to mirror JD language exactly where truthful
-3. Reorder sections and bullets to prioritize the most relevant experience
-4. Inject exact keywords from the JD naturally
-5. Quantify achievements with numbers wherever the original has vague language
-6. Match the exact job title terminology from the JD in the summary/objective
-7. Remove or de-emphasize irrelevant content
-8. Keep formatting clean and ATS-friendly (no tables, columns, or special chars)
+Your job: tailor the given resume for the job description to maximize ATS score.
 
-Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside the JSON.
+━━━ STRICT RULES ━━━
+1. NEVER fabricate, invent, or add experience/skills/credentials not in the original resume
+2. You MAY rephrase bullets to mirror JD language — but only when factually true
+3. Inject exact JD keywords naturally into bullets, summary, and skills
+4. Quantify achievements where original is vague ("improved performance" → "improved API response time by 40%")
+5. Match the exact job title from JD in the title field
+6. Reorder sections/bullets — most relevant to JD first
+7. Keep ALL sections present in original (don't drop education, projects, etc.)
+8. ATS rules: no tables, no columns, no special unicode chars in bullets
 
-JSON format:
+━━━ OUTPUT FORMAT ━━━
+Return ONLY a valid JSON object. No markdown. No backticks. No text outside JSON.
+
 {
-  "ats_score": <number 0-100>,
-  "tailored_resume": "<full tailored resume as plain text with newlines as \\n>",
-  "key_changes": ["<change 1>", "<change 2>", "<change 3>", "<change 4>", "<change 5>"],
-  "matched_keywords": ["<kw1>", "<kw2>", "<kw3>", "<kw4>", "<kw5>", "<kw6>"],
-  "missing_skills": ["<skill not in resume but required in JD>"],
-  "score_reasoning": "<1-2 sentence explanation of the ATS score>"
-}`;
+  "ats_score": <integer 0-100>,
+  "score_reasoning": "<1-2 sentences explaining the score>",
+  "key_changes": ["<specific change made>", "<specific change made>", "<specific change made>", "<specific change made>", "<specific change made>"],
+  "matched_keywords": ["<exact keyword from JD now in resume>", "<kw2>", "<kw3>", "<kw4>", "<kw5>", "<kw6>"],
+  "missing_skills": ["<skill required in JD but genuinely absent from resume>"],
+  "resume": {
+    "name": "<full name from resume>",
+    "title": "<target job title matching JD terminology>",
+    "contact": {
+      "email": "<email or empty string>",
+      "phone": "<phone or empty string>",
+      "location": "<city, state or empty string>",
+      "linkedin": "<full linkedin URL or empty string>",
+      "github": "<full github URL or empty string>",
+      "portfolio": "<portfolio URL or empty string>"
+    },
+    "summary": "<2-3 sentence professional summary. Lead with years of experience and core skills matching JD. End with value proposition.>",
+    "experience": [
+      {
+        "title": "<exact job title>",
+        "company": "<company name>",
+        "location": "<city, country or Remote>",
+        "duration": "<e.g. Jun 2023 – Present>",
+        "bullets": [
+          "<strong action verb + what you did + result/impact with metric>",
+          "<bullet 2>",
+          "<bullet 3>"
+        ]
+      }
+    ],
+    "projects": [
+      {
+        "name": "<project name>",
+        "tech": "<comma-separated tech stack>",
+        "link": "<live URL or GitHub URL or empty string>",
+        "bullets": [
+          "<what you built + tech used + impact>",
+          "<bullet 2>"
+        ]
+      }
+    ],
+    "education": [
+      {
+        "degree": "<full degree name e.g. B.E. Information Technology>",
+        "institution": "<full university name>",
+        "location": "<city or empty string>",
+        "year": "<e.g. 2022 – 2026>",
+        "grade": "<CGPA X.XX or XX% or empty string>"
+      }
+    ],
+    "skills": [
+      { "category": "Languages", "items": ["<skill1>", "<skill2>"] },
+      { "category": "Frameworks & Libraries", "items": ["<skill1>", "<skill2>"] },
+      { "category": "Databases", "items": ["<skill1>"] },
+      { "category": "Cloud & DevOps", "items": ["<skill1>"] },
+      { "category": "Tools", "items": ["<skill1>"] }
+    ],
+    "certifications": ["<cert name + issuer + year if available>"],
+    "achievements": ["<hackathon/award/recognition with context>"]
+  }
+}
 
-  const userPrompt = `ORIGINAL RESUME:
+━━━ INPUT ━━━
+
+RESUME:
 ${resume}
 
----
-
 JOB DESCRIPTION:
-${jd}
+${jd}`;
 
----
-
-Tailor this resume for the job description above. Return JSON only.`;
-
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0.3,
-      max_tokens: 4096,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userPrompt  },
-      ],
-    }),
-  });
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 8192,
+          responseMimeType: 'application/json',
+        },
+      }),
+    }
+  );
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `HTTP ${response.status}`);
+    const msg = err?.error?.message || `HTTP ${response.status}`;
+    if (response.status === 400) throw new Error('Invalid API key. Check your Gemini key at aistudio.google.com');
+    if (response.status === 429) throw new Error('Rate limit hit. Wait 60 seconds and try again.');
+    throw new Error(msg);
   }
 
   const data = await response.json();
-  const rawText = data.choices?.[0]?.message?.content || '';
-
-  // Strip any accidental markdown fences
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const cleaned = rawText.replace(/```json|```/g, '').trim();
 
   try {
@@ -334,45 +348,66 @@ Tailor this resume for the job description above. Return JSON only.`;
 
 // ─── DISPLAY RESULT ──────────────────────────────────────────────────────────
 function displayResult(result) {
-  // ATS Badge
+  _lastStructuredResume = result;
+
   const score = result.ats_score ?? 0;
   atsBadge.textContent = `ATS: ${score}%`;
   atsBadge.className = 'ats-badge ' + (score >= 80 ? 'high' : score >= 60 ? 'mid' : 'low');
 
-  // Resume text
-  const resume = (result.tailored_resume || '').replace(/\\n/g, '\n');
-  resultText.textContent = resume;
+  const r = result.resume;
+  if (r) {
+    const lines = [];
+    if (r.name) lines.push(r.name);
+    if (r.title) lines.push(r.title);
+    const c = r.contact || {};
+    const contactParts = [c.email, c.phone, c.location, c.linkedin, c.github, c.portfolio].filter(Boolean);
+    if (contactParts.length) lines.push(contactParts.join('  |  '));
+    lines.push('');
+    if (r.summary) { lines.push('── SUMMARY ──'); lines.push(r.summary); lines.push(''); }
+    if (r.experience?.length) {
+      lines.push('── EXPERIENCE ──');
+      r.experience.forEach(e => {
+        lines.push(`${e.title} — ${e.company}${e.location ? ', ' + e.location : ''}  |  ${e.duration}`);
+        e.bullets?.forEach(b => lines.push(`• ${b}`));
+        lines.push('');
+      });
+    }
+    if (r.projects?.length) {
+      lines.push('── PROJECTS ──');
+      r.projects.forEach(p => {
+        lines.push(`${p.name}  [${p.tech}]`);
+        p.bullets?.forEach(b => lines.push(`• ${b}`));
+        lines.push('');
+      });
+    }
+    if (r.skills?.length) {
+      lines.push('── SKILLS ──');
+      r.skills.forEach(s => lines.push(`${s.category}: ${s.items?.join(', ')}`));
+      lines.push('');
+    }
+    if (r.education?.length) {
+      lines.push('── EDUCATION ──');
+      r.education.forEach(e => lines.push(`${e.degree} — ${e.institution}  |  ${e.year}  |  ${e.grade}`));
+      lines.push('');
+    }
+    if (r.certifications?.length) { lines.push('── CERTIFICATIONS ──'); r.certifications.forEach(c => lines.push(`• ${c}`)); lines.push(''); }
+    if (r.achievements?.length) { lines.push('── ACHIEVEMENTS ──'); r.achievements.forEach(a => lines.push(`• ${a}`)); }
+    resultText.textContent = lines.join('\n');
+  } else {
+    resultText.textContent = 'No resume data returned. Try again.';
+  }
 
-  // Analysis cards
   analysisCards.innerHTML = '';
-
-  // Key changes
-  if (result.key_changes?.length) {
-    analysisCards.appendChild(createCard('✦ Key Changes Made', 'green', result.key_changes, 'list'));
-  }
-
-  // Matched keywords
-  if (result.matched_keywords?.length) {
-    analysisCards.appendChild(createCard('⚡ Injected Keywords', 'orange', result.matched_keywords, 'chips'));
-  }
-
-  // Missing skills
-  if (result.missing_skills?.length) {
-    analysisCards.appendChild(createCard('⚠ Skills to Acquire', 'yellow', result.missing_skills, 'list'));
-  }
-
-  // Score reasoning
+  if (result.key_changes?.length) analysisCards.appendChild(createCard('✦ Key Changes Made', 'green', result.key_changes, 'list'));
+  if (result.matched_keywords?.length) analysisCards.appendChild(createCard('⚡ Injected Keywords', 'orange', result.matched_keywords, 'chips'));
+  if (result.missing_skills?.length) analysisCards.appendChild(createCard('⚠ Skills to Acquire', 'yellow', result.missing_skills, 'list'));
   if (result.score_reasoning) {
     const card = document.createElement('div');
     card.className = 'analysis-card';
-    card.innerHTML = `
-      <div class="card-title" style="color: var(--text2)">📊 Score Reasoning</div>
-      <p style="font-size:12px; color: var(--text2); line-height:1.5">${result.score_reasoning}</p>
-    `;
+    card.innerHTML = `<div class="card-title" style="color:var(--text2)">📊 Score Reasoning</div><p style="font-size:12px;color:var(--text2);line-height:1.5">${result.score_reasoning}</p>`;
     analysisCards.appendChild(card);
   }
 
-  // Show result
   resultSection.classList.remove('hidden');
   resultSection.scrollIntoView({ behavior: 'smooth' });
 }
@@ -380,7 +415,6 @@ function displayResult(result) {
 function createCard(title, color, items, type) {
   const card = document.createElement('div');
   card.className = 'analysis-card';
-
   const titleEl = document.createElement('div');
   titleEl.className = `card-title ${color}`;
   titleEl.textContent = title;
@@ -389,24 +423,14 @@ function createCard(title, color, items, type) {
   if (type === 'list') {
     const ul = document.createElement('ul');
     ul.className = 'card-list';
-    items.forEach((item) => {
-      const li = document.createElement('li');
-      li.textContent = item;
-      ul.appendChild(li);
-    });
+    items.forEach(item => { const li = document.createElement('li'); li.textContent = item; ul.appendChild(li); });
     card.appendChild(ul);
   } else if (type === 'chips') {
     const chips = document.createElement('div');
     chips.className = 'keyword-chips';
-    items.forEach((kw) => {
-      const chip = document.createElement('span');
-      chip.className = 'keyword-chip';
-      chip.textContent = kw;
-      chips.appendChild(chip);
-    });
+    items.forEach(kw => { const chip = document.createElement('span'); chip.className = 'keyword-chip'; chip.textContent = kw; chips.appendChild(chip); });
     card.appendChild(chips);
   }
-
   return card;
 }
 
@@ -433,354 +457,182 @@ copyBtn.addEventListener('click', async () => {
       copyBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
       copyBtn.classList.remove('copied');
     }, 2000);
-  } catch {
-    copyBtn.textContent = 'Copy failed';
-  }
+  } catch { copyBtn.textContent = 'Copy failed'; }
 });
 
 // ─── EXPORT PDF ──────────────────────────────────────────────────────────────
-const exportPdfBtn = $('exportPdfBtn');
-
-exportPdfBtn.addEventListener('click', async () => {
-  const text = resultText.textContent.trim();
-  if (!text) return;
-
-  try {
-    exportPdfBtn.disabled = true;
-    await generatePDF(text, state.resumeText);
-    exportPdfBtn.textContent = '✓ Downloaded';
-    setTimeout(() => {
-      exportPdfBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg> Export PDF`;
-      exportPdfBtn.disabled = false;
-    }, 1500);
-  } catch (err) {
-    exportPdfBtn.disabled = false;
-    showError('PDF generation failed: ' + err.message);
-  }
+exportPdfBtn.addEventListener('click', () => {
+  if (!_lastStructuredResume) return;
+  const html = buildPrintHTML(_lastStructuredResume);
+  const blob = new Blob([html], { type: 'text/html' });
+  const url  = URL.createObjectURL(blob);
+  chrome.tabs.create({ url }, (tab) => {
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => window.addEventListener('load', () => setTimeout(() => window.print(), 900)),
+    });
+  });
 });
 
-async function generatePDF(resumeText, originalResumeText = '') {
-  try {
-    await generatePDFWithJsPDF(resumeText);
-    return;
-  } catch {
-    // Fall through to print preview fallback.
-  }
+// ─── PDF HTML BUILDER ────────────────────────────────────────────────────────
+function buildPrintHTML(resumeData) {
+  const r = resumeData?.resume;
+  if (!r) return '<html><body><p>No resume data.</p></body></html>';
 
-  // Fallback: open formatted preview page and use browser "Save as PDF".
-  const printHtml = buildPrintHTML(resumeText, originalResumeText);
-  const printBlob = new Blob([printHtml], { type: 'text/html' });
-  const printUrl = URL.createObjectURL(printBlob);
-  const printWindow = window.open(printUrl, '_blank');
+  const c = r.contact || {};
+  const contactItems = [
+    c.email     ? `<a href="mailto:${c.email}">${c.email}</a>` : '',
+    c.phone     ? c.phone : '',
+    c.location  ? c.location : '',
+    c.linkedin  ? `<a href="${c.linkedin}">LinkedIn</a>` : '',
+    c.github    ? `<a href="${c.github}">GitHub</a>` : '',
+    c.portfolio ? `<a href="${c.portfolio}">Portfolio</a>` : '',
+  ].filter(Boolean);
 
-  // Best layout fidelity: render resume HTML and let browser save to PDF.
-  if (printWindow) {
-    // Release Blob memory once the opened page has had time to load.
-    setTimeout(() => URL.revokeObjectURL(printUrl), 60_000);
-    return;
-  }
+  const expHTML = (r.experience || []).map(e => `
+    <div class="entry">
+      <div class="entry-header">
+        <div class="entry-left">
+          <span class="entry-title">${e.title || ''}</span>
+          <span class="entry-sub">${[e.company, e.location].filter(Boolean).join(', ')}</span>
+        </div>
+        <div class="entry-right">${e.duration || ''}</div>
+      </div>
+      <ul class="bullets">${(e.bullets || []).map(b => `<li>${b}</li>`).join('')}</ul>
+    </div>`).join('');
 
-  // Fallback for popup-blocked environments.
-  await generatePDFWithJsPDF(resumeText);
-}
+  const projHTML = (r.projects || []).map(p => `
+    <div class="entry">
+      <div class="entry-header">
+        <div class="entry-left">
+          <span class="entry-title">${p.name || ''}${p.link ? ` <a href="${p.link}" class="proj-link">↗</a>` : ''}</span>
+          ${p.tech ? `<span class="entry-tech">${p.tech}</span>` : ''}
+        </div>
+      </div>
+      <ul class="bullets">${(p.bullets || []).map(b => `<li>${b}</li>`).join('')}</ul>
+    </div>`).join('');
 
-async function generatePDFWithJsPDF(resumeText) {
-  // Load jsPDF UMD bundle only when it isn't already available.
-  if (!window.jspdf?.jsPDF) {
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('lib/jspdf.umd.min.js');
-    document.head.appendChild(script);
-    await new Promise((resolve, reject) => {
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('Failed to load jsPDF library.'));
-    });
-  }
+  const eduHTML = (r.education || []).map(e => `
+    <div class="entry">
+      <div class="entry-header">
+        <div class="entry-left">
+          <span class="entry-title">${e.degree || ''}</span>
+          <span class="entry-sub">${[e.institution, e.location].filter(Boolean).join(', ')}</span>
+        </div>
+        <div class="entry-right">${[e.year, e.grade].filter(Boolean).join('  |  ')}</div>
+      </div>
+    </div>`).join('');
 
-  const JsPDFClass = window.jspdf?.jsPDF;
-  if (!JsPDFClass) {
-    throw new Error('jsPDF library is unavailable.');
-  }
+  const skillsHTML = (r.skills || []).map(s => `
+    <div class="skill-row">
+      <span class="skill-cat">${s.category}:</span>
+      <span class="skill-items">${(s.items || []).join(', ')}</span>
+    </div>`).join('');
 
-  const doc = new JsPDFClass();
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 40;
-  const lineHeight = 6;
-  let y = 40;
-
-  const lines = resumeText.split('\n');
-
-  // Title/Name
-  doc.setFontSize(20);
-  doc.text(lines[0] || 'Resume', margin, y);
-  y += 20;
-
-  // Body
-  doc.setFontSize(12);
-  for (let i = 1; i < lines.length && y < pageHeight - 40; i++) {
-    const line = lines[i].trim();
-    if (line) {
-      const split = doc.splitTextToSize(line, pageWidth - 2 * margin);
-      doc.text(split, margin, y);
-      y += split.length * lineHeight;
-    }
-    
-    if (y > pageHeight - 40) {
-      doc.addPage();
-      y = 40;
-    }
-  }
-
-  const pdfBlob = doc.output('blob');
-  const downloadUrl = URL.createObjectURL(pdfBlob);
-  const link = document.createElement('a');
-  link.href = downloadUrl;
-  link.download = 'Tailored_Resume.pdf';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(downloadUrl), 10_000);
-}
-
-
-function buildPrintHTML(resumeText, originalResumeText = '') {
-  // Parse resume text into sections for clean formatting
-  const lines = resumeText.split('\n').filter(l => l.trim());
-  const originalLines = originalResumeText.split('\n').filter(l => l.trim());
-  const hasDenseOriginal = originalLines.length > 30;
-
-  const formattedLines = lines.map(line => {
-    const trimmed = line.trim();
-
-    // Detect section headers (ALL CAPS or Title Case short lines)
-    if (
-      trimmed.length > 2 && trimmed.length < 40 &&
-      (trimmed === trimmed.toUpperCase() ||
-       /^(Experience|Education|Skills|Projects|Summary|Objective|Certifications|Awards|Languages|Contact|Publications|Volunteer)/i.test(trimmed))
-    ) {
-      return `<h2>${trimmed}</h2>`;
-    }
-
-    // Detect bullet points
-    if (/^[•\-\*▪◦]/.test(trimmed)) {
-      return `<li>${trimmed.replace(/^[•\-\*▪◦]\s*/, '')}</li>`;
-    }
-
-    // Detect name (first line, usually)
-    if (lines.indexOf(line) === 0 && trimmed.length < 50) {
-      return `<h1>${trimmed}</h1>`;
-    }
-
-    // Detect contact info line (has @ or phone pattern)
-    if (/[@|•|linkedin|github|\+91|\d{10}]/i.test(trimmed) && trimmed.length < 120) {
-      return `<p class="contact">${trimmed}</p>`;
-    }
-
-    // Job title / company lines (bold short lines)
-    if (trimmed.length < 80 && !trimmed.endsWith('.')) {
-      return `<p class="subtitle">${trimmed}</p>`;
-    }
-
-    return `<p>${trimmed}</p>`;
-  }).join('\n');
+  const certsHTML = (r.certifications || []).map(c => `<li>${c}</li>`).join('');
+  const achHTML   = (r.achievements   || []).map(a => `<li>${a}</li>`).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Tailored Resume — ResumeForge AI</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <title>${r.name || 'Resume'} — ResumeForge AI</title>
   <style>
-    /* ── BASE ── */
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-    :root {
-      --accent: #CC3300;
-      --text: #1a1a1a;
-      --text2: #444;
-      --border: #ddd;
-      --bg: #ffffff;
-    }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
     body {
-      font-family: 'Inter', 'Times New Roman', serif;
-      font-size: ${hasDenseOriginal ? '10pt' : '10.5pt'};
-      color: var(--text);
-      background: var(--bg);
-      max-width: 780px;
+      font-family: 'Inter', Arial, sans-serif;
+      font-size: 10pt;
+      color: #1a1a1a;
+      background: #fff;
+      max-width: 210mm;
       margin: 0 auto;
-      padding: ${hasDenseOriginal ? '30px 44px' : '36px 48px'};
-      line-height: 1.55;
+      padding: 20mm 18mm;
+      line-height: 1.45;
     }
 
-    /* ── TYPOGRAPHY ── */
-    h1 {
-      font-size: 22pt;
-      font-weight: 700;
-      color: var(--text);
-      letter-spacing: -0.5px;
-      margin-bottom: 4px;
+    .resume-header { text-align:center; margin-bottom:14px; }
+    .resume-name { font-size:22pt; font-weight:700; letter-spacing:-0.5px; color:#111; line-height:1.1; }
+    .resume-title { font-size:11pt; font-weight:500; color:#555; margin-top:3px; margin-bottom:8px; }
+    .contact-line { font-size:9pt; color:#555; display:flex; flex-wrap:wrap; justify-content:center; gap:4px 14px; }
+    .contact-line a { color:#555; text-decoration:none; }
+
+    .divider { border:none; border-top:1.5px solid #CC3300; margin:10px 0 12px; }
+
+    .section { margin-bottom:14px; }
+    .section-title {
+      font-size:9pt; font-weight:700; text-transform:uppercase;
+      letter-spacing:0.12em; color:#CC3300;
+      border-bottom:1px solid #CC3300; padding-bottom:2px; margin-bottom:8px;
     }
 
-    h2 {
-      font-size: 9.5pt;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--accent);
-      border-bottom: 1.5px solid var(--accent);
-      padding-bottom: 3px;
-      margin: 18px 0 8px;
-    }
+    .summary-text { font-size:10pt; color:#333; line-height:1.55; }
 
-    p { margin-bottom: 3px; color: var(--text2); }
+    .entry { margin-bottom:9px; }
+    .entry-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:3px; }
+    .entry-left { display:flex; flex-direction:column; gap:1px; }
+    .entry-title { font-size:10.5pt; font-weight:700; color:#111; }
+    .entry-sub { font-size:9.5pt; color:#555; font-style:italic; }
+    .entry-tech { font-size:9pt; color:#777; }
+    .entry-right { font-size:9.5pt; color:#555; white-space:nowrap; text-align:right; flex-shrink:0; }
+    .proj-link { font-size:9pt; color:#CC3300; text-decoration:none; margin-left:4px; }
 
-    p.contact {
-      font-size: 9.5pt;
-      color: #666;
-      margin-bottom: 2px;
-    }
+    .bullets { list-style:none; padding-left:12px; }
+    .bullets li { position:relative; padding-left:12px; font-size:9.5pt; color:#333; line-height:1.45; margin-bottom:2px; }
+    .bullets li::before { content:'▪'; position:absolute; left:0; color:#CC3300; font-size:8pt; top:1px; }
 
-    p.subtitle {
-      font-size: 10pt;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 2px;
-    }
+    .skill-row { display:flex; gap:6px; margin-bottom:3px; font-size:9.5pt; line-height:1.4; }
+    .skill-cat { font-weight:700; color:#111; white-space:nowrap; min-width:90px; }
+    .skill-items { color:#333; }
 
-    li {
-      font-size: 10pt;
-      color: var(--text2);
-      margin-left: 16px;
-      margin-bottom: 3px;
-      list-style-type: disc;
-    }
-
-    /* ── WATERMARK ── */
-    .watermark {
-      position: fixed;
-      bottom: 12px;
-      right: 16px;
-      font-size: 7.5pt;
-      color: #bbb;
-      font-family: 'Inter', sans-serif;
-    }
-
-    /* ── PRINT ── */
-    @media print {
-      body { padding: 20px 32px; }
-      @page {
-        size: A4;
-        margin: 16mm 14mm;
-      }
-      h2 { break-after: avoid; }
-      h1 { break-after: avoid; }
-      .watermark { display: block; }
-      .no-print { display: none; }
-    }
-
-    /* ── SCREEN TOOLBAR ── */
     .toolbar {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      background: #1a1a1a;
-      padding: 10px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      z-index: 100;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      position:fixed; top:0; left:0; right:0; background:#111;
+      padding:10px 20px; display:flex; align-items:center;
+      justify-content:space-between; z-index:999;
+      box-shadow:0 2px 16px rgba(0,0,0,0.4);
     }
-
-    .toolbar-title {
-      color: #fff;
-      font-size: 13px;
-      font-weight: 600;
-      font-family: 'Inter', sans-serif;
-    }
-
-    .toolbar-title span { color: #FF4D26; }
-
-    .toolbar-btns { display: flex; gap: 10px; }
-
-    .btn-print {
-      background: #FF4D26;
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      padding: 7px 18px;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: 'Inter', sans-serif;
-      cursor: pointer;
-      transition: opacity 0.15s;
-    }
-    .btn-print:hover { opacity: 0.85; }
-
-    .btn-close {
-      background: #2a2a2a;
-      color: #ccc;
-      border: 1px solid #3a3a3a;
-      border-radius: 6px;
-      padding: 7px 14px;
-      font-size: 12px;
-      font-family: 'Inter', sans-serif;
-      cursor: pointer;
-    }
-
-    .resume-body { padding-top: 52px; }
+    .toolbar-title { color:#fff; font-size:13px; font-weight:600; }
+    .toolbar-title span { color:#FF4D26; }
+    .toolbar-btns { display:flex; gap:10px; }
+    .btn-save { background:#FF4D26; color:#fff; border:none; border-radius:6px; padding:7px 18px; font-size:12px; font-weight:700; cursor:pointer; }
+    .btn-save:hover { opacity:0.88; }
+    .btn-close { background:#222; color:#bbb; border:1px solid #333; border-radius:6px; padding:7px 14px; font-size:12px; cursor:pointer; }
+    .screen-offset { height:52px; }
 
     @media print {
-      .toolbar { display: none; }
-      .resume-body { padding-top: 0; }
+      .toolbar, .screen-offset { display:none; }
+      body { padding:14mm 12mm; }
+      @page { size:A4; margin:12mm 10mm; }
+      .section, .entry { page-break-inside:avoid; }
     }
   </style>
 </head>
 <body>
 
-  <div class="toolbar no-print">
-    <div class="toolbar-title">ResumeForge <span>AI</span> — Tailored Resume</div>
+  <div class="toolbar">
+    <div class="toolbar-title">ResumeForge <span>AI</span></div>
     <div class="toolbar-btns">
       <button class="btn-close" onclick="window.close()">✕ Close</button>
-      <button class="btn-print" onclick="window.print()">
-        ⬇ Save as PDF
-      </button>
+      <button class="btn-save" onclick="window.print()">⬇ Save as PDF</button>
     </div>
   </div>
+  <div class="screen-offset"></div>
 
-  <div class="resume-body">
-    ${formattedLines}
+  <div class="resume-header">
+    <div class="resume-name">${r.name || ''}</div>
+    ${r.title ? `<div class="resume-title">${r.title}</div>` : ''}
+    <div class="contact-line">${contactItems.join('<span>·</span>')}</div>
   </div>
+  <hr class="divider"/>
 
-  <div class="watermark">Generated by ResumeForge AI</div>
-
-  <script>
-    // Convert loose <li> tags into proper <ul> wrappers
-    document.querySelectorAll('li').forEach(li => {
-      if (li.previousElementSibling?.tagName !== 'UL' && li.parentElement?.tagName !== 'UL') {
-        const ul = document.createElement('ul');
-        li.parentNode.insertBefore(ul, li);
-        ul.appendChild(li);
-        // Grab following siblings that are also li
-        while (ul.nextElementSibling && ul.nextElementSibling.tagName === 'LI') {
-          ul.appendChild(ul.nextElementSibling);
-        }
-      }
-    });
-
-    // Auto-open print dialog once content is rendered.
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        try {
-          window.focus();
-          window.print();
-        } catch {
-          // User can still click the Save as PDF button manually.
-        }
-      }, 300);
-    });
-  <\/script>
+  ${r.summary ? `<div class="section"><div class="section-title">Professional Summary</div><p class="summary-text">${r.summary}</p></div>` : ''}
+  ${expHTML   ? `<div class="section"><div class="section-title">Experience</div>${expHTML}</div>` : ''}
+  ${projHTML  ? `<div class="section"><div class="section-title">Projects</div>${projHTML}</div>` : ''}
+  ${skillsHTML? `<div class="section"><div class="section-title">Technical Skills</div>${skillsHTML}</div>` : ''}
+  ${eduHTML   ? `<div class="section"><div class="section-title">Education</div>${eduHTML}</div>` : ''}
+  ${certsHTML ? `<div class="section"><div class="section-title">Certifications</div><ul class="bullets">${certsHTML}</ul></div>` : ''}
+  ${achHTML   ? `<div class="section"><div class="section-title">Achievements</div><ul class="bullets">${achHTML}</ul></div>` : ''}
 
 </body>
 </html>`;
@@ -792,13 +644,5 @@ function setLoading(on) {
   btnContent.style.display = on ? 'none' : 'flex';
   btnLoader.classList.toggle('hidden', !on);
 }
-
-function showError(msg) {
-  errorMsg.textContent = msg;
-  errorMsg.classList.remove('hidden');
-}
-
-function hideError() {
-  errorMsg.classList.add('hidden');
-  errorMsg.textContent = '';
-}
+function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.remove('hidden'); }
+function hideError() { errorMsg.classList.add('hidden'); errorMsg.textContent = ''; }
