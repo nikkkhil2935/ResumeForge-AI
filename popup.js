@@ -187,7 +187,23 @@ scrapeBtn.addEventListener('click', async () => {
   scrapeBtn.textContent = 'Scraping...';
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const response = await chrome.tabs.sendMessage(tab.id, { action: 'scrapeJD' });
+    if (!tab?.id) throw new Error('No active tab found');
+    if (!isSupportedPageForScrape(tab.url)) {
+      throw new Error('Open a normal job page (http/https). Chrome internal pages cannot be scraped');
+    }
+
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, { action: 'scrapeJD' });
+    } catch (err) {
+      const msg = String(err?.message || '');
+      if (!msg.includes('Receiving end does not exist')) throw err;
+
+      // Inject the content script if it is not present yet, then retry once.
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      response = await chrome.tabs.sendMessage(tab.id, { action: 'scrapeJD' });
+    }
+
     state.scrapedJD = response.jd || '';
     if (state.scrapedJD.length < 30) {
       showError('Could not extract job description. Try pasting manually.');
@@ -236,97 +252,111 @@ exportPdfBtn.addEventListener('click', async () => {
     return;
   }
   try {
-    const html = buildPrintHTML(_lastStructuredResume.resume);
+    const html = buildPrintHTML(_lastStructuredResume.resume, chrome.runtime.getURL(''));
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
-    await chrome.tabs.create({ url, active: false });
-    setTimeout(() => { exportPdfBtn.textContent = '✓ Downloaded'; }, 300);
-    setTimeout(() => { exportPdfBtn.textContent = 'Export PDF'; }, 3000);
+    await chrome.tabs.create({ url, active: true });
+    setTimeout(() => { exportPdfBtn.textContent = '✓ Preview Opened'; }, 300);
+    setTimeout(() => { exportPdfBtn.textContent = 'Export PDF'; }, 2500);
   } catch (err) {
     showError(`Export failed: ${err.message}`);
   }
 });
 
-function buildPrintHTML(resume) {
+function buildPrintHTML(resume, extensionBaseUrl) {
   const r = resume || {};
+  const safe = escapeHtml;
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Resume</title>
+  <title>Resume Preview</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Calibri', 'Arial', sans-serif; color: #333; line-height: 1.5; }
-    @media print { body { margin: 0; padding: 20px; } }
+    body { font-family: 'Calibri', 'Arial', sans-serif; color: #111; line-height: 1.5; background: #f6f7f8; }
+    .toolbar { max-width: 8.5in; margin: 20px auto 0; display: flex; gap: 10px; }
+    .toolbar button { border: 1px solid #111; background: #111; color: #fff; font-size: 13px; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+    .toolbar button.secondary { background: #fff; color: #111; }
     .container { max-width: 8.5in; margin: auto; padding: 20px; }
-    .header { border-bottom: 3px solid #FF4D26; padding-bottom: 12px; margin-bottom: 16px; }
+    .paper { background: #fff; border: 1px solid #e2e2e2; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+    .header { border-bottom: 3px solid #111; padding-bottom: 12px; margin-bottom: 16px; }
     .name { font-size: 24px; font-weight: 700; color: #000; }
-    .title { font-size: 14px; color: #666; margin-top: 4px; }
-    .contact { font-size: 11px; color: #666; margin-top: 8px; }
+    .title { font-size: 14px; color: #222; margin-top: 4px; }
+    .contact { font-size: 11px; color: #222; margin-top: 8px; }
     .section { margin-bottom: 16px; }
-    .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #FF4D26; border-bottom: 1px solid #FF4D26; padding-bottom: 4px; margin-bottom: 8px; }
+    .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #111; border-bottom: 1px solid #111; padding-bottom: 4px; margin-bottom: 8px; }
     .entry { margin-bottom: 10px; }
     .entry-header { font-weight: 600; font-size: 12px; color: #000; }
-    .entry-sub { font-size: 11px; color: #666; margin-top: 2px; }
+    .entry-sub { font-size: 11px; color: #333; margin-top: 2px; }
     .entry-bullets { font-size: 11px; margin-left: 14px; margin-top: 4px; }
     .entry-bullets li { margin-bottom: 3px; }
     .skills-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 11px; }
-    .skill-cat { font-weight: 600; color: #FF4D26; margin-bottom: 4px; }
+    .skill-cat { font-weight: 600; color: #111; margin-bottom: 4px; }
     .skill-items { font-size: 11px; }
     @media print {
       .page-break { page-break-after: always; }
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .paper { border: none; border-radius: 0; box-shadow: none; }
       body { padding: 0.5in; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="toolbar">
+    <button id="downloadPdfBtn">Download PDF</button>
+    <button id="closeBtn" class="secondary">Close Preview</button>
+  </div>
+  <div class="container paper" id="resumeRoot">
     <div class="header">
-      <div class="name">${r.name || 'Your Name'}</div>
-      <div class="title">${r.title || 'Job Title'}</div>
+      <div class="name">${safe(r.name || 'Your Name')}</div>
+      <div class="title">${safe(r.title || 'Job Title')}</div>
       <div class="contact">
         ${[r.contact?.email, r.contact?.phone, r.contact?.location, r.contact?.linkedin, r.contact?.github]
-          .filter(Boolean).join(' • ')}
+          .filter(Boolean)
+          .map(safe)
+          .join(' • ')}
       </div>
     </div>
     ${r.summary ? `<div class="section">
       <div class="section-title">Professional Summary</div>
-      <p style="font-size: 11px; line-height: 1.4;">${r.summary}</p>
+      <p style="font-size: 11px; line-height: 1.4;">${safe(r.summary)}</p>
     </div>` : ''}
     ${r.experience?.length ? `<div class="section">
       <div class="section-title">Experience</div>
       ${r.experience.map(e => `<div class="entry">
-        <div class="entry-header">${e.title} — ${e.company}${e.location ? ` • ${e.location}` : ''}</div>
-        <div class="entry-sub">${e.duration || ''}</div>
-        ${e.bullets?.length ? `<ul class="entry-bullets">${e.bullets.map(b => `<li>${b}</li>`).join('')}</ul>` : ''}
+        <div class="entry-header">${safe(e.title || '')} — ${safe(e.company || '')}${e.location ? ` • ${safe(e.location)}` : ''}</div>
+        <div class="entry-sub">${safe(e.duration || '')}</div>
+        ${e.bullets?.length ? `<ul class="entry-bullets">${e.bullets.map(b => `<li>${safe(b)}</li>`).join('')}</ul>` : ''}
       </div>`).join('')}
     </div>` : ''}
     ${r.projects?.length ? `<div class="section">
       <div class="section-title">Projects</div>
       ${r.projects.map(p => `<div class="entry">
-        <div class="entry-header">${p.name}${p.tech ? ` • ${p.tech}` : ''}</div>
-        ${p.bullets?.length ? `<ul class="entry-bullets">${p.bullets.map(b => `<li>${b}</li>`).join('')}</ul>` : ''}
+        <div class="entry-header">${safe(p.name || '')}${p.tech ? ` • ${safe(p.tech)}` : ''}</div>
+        ${p.bullets?.length ? `<ul class="entry-bullets">${p.bullets.map(b => `<li>${safe(b)}</li>`).join('')}</ul>` : ''}
       </div>`).join('')}
     </div>` : ''}
     ${r.education?.length ? `<div class="section">
       <div class="section-title">Education</div>
       ${r.education.map(e => `<div class="entry">
-        <div class="entry-header">${e.degree}</div>
-        <div class="entry-sub">${e.institution}${e.year ? ` • ${e.year}` : ''}${e.grade ? ` • ${e.grade}` : ''}</div>
+        <div class="entry-header">${safe(e.degree || '')}</div>
+        <div class="entry-sub">${safe(e.institution || '')}${e.year ? ` • ${safe(e.year)}` : ''}${e.grade ? ` • ${safe(e.grade)}` : ''}</div>
       </div>`).join('')}
     </div>` : ''}
     ${r.skills?.length ? `<div class="section">
       <div class="section-title">Skills</div>
       <div class="skills-grid">
         ${r.skills.map(s => `<div>
-          <div class="skill-cat">${s.category}</div>
-          <div class="skill-items">${s.items?.join(', ')}</div>
+          <div class="skill-cat">${safe(s.category || '')}</div>
+          <div class="skill-items">${(s.items || []).map(safe).join(', ')}</div>
         </div>`).join('')}
       </div>
     </div>` : ''}
   </div>
   <script>
-    window.addEventListener('load', () => { window.print(); });
+    document.getElementById('downloadPdfBtn').addEventListener('click', () => window.print());
+    document.getElementById('closeBtn').addEventListener('click', () => window.close());
   </script>
 </body>
 </html>`;
@@ -673,6 +703,19 @@ function showError(msg) {
   } else {
     errorMsg.classList.add('hidden');
   }
+}
+
+function isSupportedPageForScrape(url = '') {
+  return /^https?:\/\//i.test(url);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function setLoading(isLoading) {
