@@ -321,7 +321,6 @@ ${jd}`;
         generationConfig: {
           temperature: 0.2,
           maxOutputTokens: 8192,
-          responseMimeType: 'application/json',
         },
       }),
     }
