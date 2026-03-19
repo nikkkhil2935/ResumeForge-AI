@@ -1,4 +1,4 @@
-/* ── ResumeForge AI — popup.js ── */
+/* ── ResumeForge AI — popup.js (Multi-Provider LLM Support) ── */
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 const state = {
@@ -6,6 +6,7 @@ const state = {
   jdText: '',
   activeJdTab: 'scrape',
   scrapedJD: '',
+  provider: 'gemini',
   apiKey: '',
 };
 let _lastStructuredResume = null;
@@ -14,7 +15,7 @@ let _lastStructuredResume = null;
 const $ = (id) => document.getElementById(id);
 const settingsToggle  = $('settingsToggle');
 const apiPanel        = $('apiPanel');
-const apiKeyInput     = $('apiKey');
+const providerSelect  = $('providerSelect');
 const saveKeyBtn      = $('saveKey');
 const apiStatus       = $('apiStatus');
 const uploadZone      = $('uploadZone');
@@ -49,28 +50,53 @@ const analysisPane    = $('analysisPane');
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 async function init() {
-  const stored = await chrome.storage.local.get(['apiKey']);
+  const stored = await chrome.storage.local.get(['provider', 'apiKey']);
+  if (stored.provider) {
+    state.provider = stored.provider;
+    providerSelect.value = stored.provider;
+    updateProviderInputs();
+  }
   if (stored.apiKey) {
     state.apiKey = stored.apiKey;
-    apiKeyInput.value = stored.apiKey;
-    apiStatus.textContent = '✓ API key saved';
+    const inputId = `apiKey${state.provider.charAt(0).toUpperCase() + state.provider.slice(1)}`;
+    $(inputId).value = stored.apiKey;
+    apiStatus.textContent = '✓ API key loaded';
     apiStatus.className = 'api-status ok';
   }
 }
 init();
 
+// ─── PROVIDER SELECTION ───────────────────────────────────────────────────────
+providerSelect.addEventListener('change', (e) => {
+  state.provider = e.target.value;
+  updateProviderInputs();
+});
+
+function updateProviderInputs() {
+  const providers = ['gemini', 'openai', 'groq', 'anthropic'];
+  providers.forEach(p => {
+    const el = $(`${p}Input`);
+    if (p === state.provider) {
+      el.classList.remove('hidden');
+    } else {
+      el.classList.add('hidden');
+    }
+  });
+}
+
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 settingsToggle.addEventListener('click', () => apiPanel.classList.toggle('visible'));
 
 saveKeyBtn.addEventListener('click', async () => {
-  const key = apiKeyInput.value.trim();
+  const inputId = `apiKey${state.provider.charAt(0).toUpperCase() + state.provider.slice(1)}`;
+  const key = $(inputId).value.trim();
   if (!key) {
     apiStatus.textContent = '✗ Enter an API key';
     apiStatus.className = 'api-status err';
     return;
   }
   state.apiKey = key;
-  await chrome.storage.local.set({ apiKey: key });
+  await chrome.storage.local.set({ provider: state.provider, apiKey: key });
   apiStatus.textContent = '✓ API key saved';
   apiStatus.className = 'api-status ok';
 });
@@ -98,83 +124,82 @@ removeFileBtn.addEventListener('click', (e) => {
   uploadSuccess.style.display = 'none';
 });
 
+// ─── FILE HANDLING ───────────────────────────────────────────────────────────
 async function handleFile(file) {
-  if (!file.name.endsWith('.pdf')) { showError('Please upload a PDF file.'); return; }
-  if (file.size > 10 * 1024 * 1024) { showError('File too large. Max 10MB.'); return; }
-
-  fileNameEl.textContent = file.name;
-  uploadIdle.style.display = 'none';
-  uploadSuccess.style.display = 'flex';
+  if (!file.name.endsWith('.pdf')) {
+    showError('Only PDF files are supported.');
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    showError('File is too large. Max 10MB.');
+    return;
+  }
   parsedStatus.textContent = 'Parsing PDF...';
-  parsedStatus.className = 'parsed-status';
-
+  uploadIdle.style.display = 'none';
+  uploadSuccess.style.display = 'block';
+  fileNameEl.textContent = file.name;
   try {
     const text = await extractPDFText(file);
-    if (!text || text.trim().length < 50) throw new Error('Could not extract text. Is this a scanned PDF?');
-    state.resumeText = text.trim();
-    parsedStatus.textContent = `✓ Parsed — ${state.resumeText.length.toLocaleString()} characters`;
-    parsedStatus.className = 'parsed-status ok';
+    state.resumeText = text;
+    parsedStatus.textContent = `✓ Extracted ${text.length} characters`;
   } catch (err) {
-    parsedStatus.textContent = `✗ ${err.message}`;
-    parsedStatus.className = 'parsed-status err';
-    state.resumeText = '';
+    parsedStatus.textContent = `✗ Failed to parse: ${err.message}`;
   }
 }
 
 async function extractPDFText(file) {
-  const pdfjs = globalThis.pdfjsLib;
-  if (!pdfjs) throw new Error('PDF.js not loaded. Add lib/pdf.mjs and lib/pdf.worker.mjs');
-
-  pdfjs.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('lib/pdf.worker.mjs');
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-
-  let fullText = '';
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
+  await globalThis.pdfjsWorkerPromise;
+  const worker = await globalThis.pdfjsWorkerPromise;
+  const arrayBuf = await file.arrayBuffer();
+  const doc = await globalThis.pdfjsLib.getDocument(arrayBuf).promise;
+  let text = '';
+  for (let i = 0; i < doc.numPages; i++) {
+    const page = await doc.getPage(i + 1);
     const content = await page.getTextContent();
-    fullText += content.items.map((item) => item.str).join(' ') + '\n';
+    text += content.items.map(item => item.str).join(' ') + '\n';
   }
-  return fullText;
+  return text.trim();
 }
 
-// ─── JD TABS ─────────────────────────────────────────────────────────────────
-tabBtns.forEach((btn) => {
+// ─── INIT PDF.JS ─────────────────────────────────────────────────────────────
+globalThis.pdfjsWorkerPromise = (async () => {
+  const workerUrl = chrome.runtime.getURL('lib/pdf.worker.mjs');
+  globalThis.pdfjsLib = await import(workerUrl.replace('.worker.mjs', '.mjs'));
+  globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+})();
+
+// ─── JOB DESCRIPTION TABS ────────────────────────────────────────────────────
+tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
-    state.activeJdTab = btn.dataset.tab;
-    tabBtns.forEach((b) => b.classList.remove('active'));
+    const tab = btn.dataset.tab;
+    state.activeJdTab = tab;
+    tabBtns.forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    scrapeTab.classList.toggle('hidden', btn.dataset.tab !== 'scrape');
-    pasteTab.classList.toggle('hidden', btn.dataset.tab !== 'paste');
+    scrapeTab.classList.toggle('hidden', tab !== 'scrape');
+    pasteTab.classList.toggle('hidden', tab !== 'paste');
   });
 });
 
-// ─── SCRAPE JD ───────────────────────────────────────────────────────────────
+// ─── SCRAPE FUNCTIONALITY ─────────────────────────────────────────────────────
 scrapeBtn.addEventListener('click', async () => {
+  showError('');
   scrapeBtn.disabled = true;
-  scrapeBtn.querySelector('span').textContent = 'Scraping...';
+  scrapeBtn.textContent = 'Scraping...';
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] }).catch(() => {});
-
-    const response = await new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(tab.id, { action: 'scrapeJD' }, (res) => {
-        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-        else resolve(res);
-      });
-    });
-
-    const jd = response?.jd?.trim();
-    if (!jd || jd.length < 50) throw new Error('No JD found on this page. Try pasting manually.');
-
-    state.scrapedJD = jd;
-    scrapedPreview.textContent = jd;
-    scrapedResult.style.display = 'block';
+    const response = await chrome.tabs.sendMessage(tab.id, { action: 'scrapeJD' });
+    state.scrapedJD = response.jd || '';
+    if (state.scrapedJD.length < 30) {
+      showError('Could not extract job description. Try pasting manually.');
+    } else {
+      scrapedPreview.textContent = state.scrapedJD.slice(0, 200) + '...';
+      scrapedResult.style.display = 'block';
+    }
   } catch (err) {
-    showError(err.message);
+    showError(`Scrape failed: ${err.message}. Try pasting manually.`);
   } finally {
     scrapeBtn.disabled = false;
-    scrapeBtn.querySelector('span').textContent = 'Scrape Job Description';
+    scrapeBtn.textContent = 'Scrape Job Description';
   }
 });
 
@@ -184,19 +209,136 @@ clearScrapeBtn.addEventListener('click', () => {
 });
 
 jdPaste.addEventListener('input', () => {
-  charCount.textContent = jdPaste.value.length.toLocaleString();
+  charCount.textContent = jdPaste.value.length;
 });
 
-// ─── GENERATE ────────────────────────────────────────────────────────────────
-generateBtn.addEventListener('click', async () => {
-  hideError();
+// ─── RESULT TABS ─────────────────────────────────────────────────────────────
+resultTabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    const rtab = tab.dataset.rtab;
+    resultTabs.forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    resumePane.classList.toggle('hidden', rtab !== 'resume');
+    analysisPane.classList.toggle('hidden', rtab !== 'analysis');
+  });
+});
 
-  if (!state.apiKey) {
-    showError('Please add your free Gemini API key (⚙ icon). Get one at aistudio.google.com');
-    apiPanel.classList.add('visible');
+copyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(resultText.textContent);
+  copyBtn.textContent = '✓ Copied!';
+  setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+});
+
+// ─── PDF EXPORT ───────────────────────────────────────────────────────────────
+exportPdfBtn.addEventListener('click', async () => {
+  if (!_lastStructuredResume) {
+    showError('No resume to export. Generate one first.');
     return;
   }
-  if (!state.resumeText) {
+  try {
+    const html = buildPrintHTML(_lastStructuredResume.resume);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    await chrome.tabs.create({ url, active: false });
+    setTimeout(() => { exportPdfBtn.textContent = '✓ Downloaded'; }, 300);
+    setTimeout(() => { exportPdfBtn.textContent = 'Export PDF'; }, 3000);
+  } catch (err) {
+    showError(`Export failed: ${err.message}`);
+  }
+});
+
+function buildPrintHTML(resume) {
+  const r = resume || {};
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Resume</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Calibri', 'Arial', sans-serif; color: #333; line-height: 1.5; }
+    @media print { body { margin: 0; padding: 20px; } }
+    .container { max-width: 8.5in; margin: auto; padding: 20px; }
+    .header { border-bottom: 3px solid #FF4D26; padding-bottom: 12px; margin-bottom: 16px; }
+    .name { font-size: 24px; font-weight: 700; color: #000; }
+    .title { font-size: 14px; color: #666; margin-top: 4px; }
+    .contact { font-size: 11px; color: #666; margin-top: 8px; }
+    .section { margin-bottom: 16px; }
+    .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: #FF4D26; border-bottom: 1px solid #FF4D26; padding-bottom: 4px; margin-bottom: 8px; }
+    .entry { margin-bottom: 10px; }
+    .entry-header { font-weight: 600; font-size: 12px; color: #000; }
+    .entry-sub { font-size: 11px; color: #666; margin-top: 2px; }
+    .entry-bullets { font-size: 11px; margin-left: 14px; margin-top: 4px; }
+    .entry-bullets li { margin-bottom: 3px; }
+    .skills-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 11px; }
+    .skill-cat { font-weight: 600; color: #FF4D26; margin-bottom: 4px; }
+    .skill-items { font-size: 11px; }
+    @media print {
+      .page-break { page-break-after: always; }
+      body { padding: 0.5in; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="name">${r.name || 'Your Name'}</div>
+      <div class="title">${r.title || 'Job Title'}</div>
+      <div class="contact">
+        ${[r.contact?.email, r.contact?.phone, r.contact?.location, r.contact?.linkedin, r.contact?.github]
+          .filter(Boolean).join(' • ')}
+      </div>
+    </div>
+    ${r.summary ? `<div class="section">
+      <div class="section-title">Professional Summary</div>
+      <p style="font-size: 11px; line-height: 1.4;">${r.summary}</p>
+    </div>` : ''}
+    ${r.experience?.length ? `<div class="section">
+      <div class="section-title">Experience</div>
+      ${r.experience.map(e => `<div class="entry">
+        <div class="entry-header">${e.title} — ${e.company}${e.location ? ` • ${e.location}` : ''}</div>
+        <div class="entry-sub">${e.duration || ''}</div>
+        ${e.bullets?.length ? `<ul class="entry-bullets">${e.bullets.map(b => `<li>${b}</li>`).join('')}</ul>` : ''}
+      </div>`).join('')}
+    </div>` : ''}
+    ${r.projects?.length ? `<div class="section">
+      <div class="section-title">Projects</div>
+      ${r.projects.map(p => `<div class="entry">
+        <div class="entry-header">${p.name}${p.tech ? ` • ${p.tech}` : ''}</div>
+        ${p.bullets?.length ? `<ul class="entry-bullets">${p.bullets.map(b => `<li>${b}</li>`).join('')}</ul>` : ''}
+      </div>`).join('')}
+    </div>` : ''}
+    ${r.education?.length ? `<div class="section">
+      <div class="section-title">Education</div>
+      ${r.education.map(e => `<div class="entry">
+        <div class="entry-header">${e.degree}</div>
+        <div class="entry-sub">${e.institution}${e.year ? ` • ${e.year}` : ''}${e.grade ? ` • ${e.grade}` : ''}</div>
+      </div>`).join('')}
+    </div>` : ''}
+    ${r.skills?.length ? `<div class="section">
+      <div class="section-title">Skills</div>
+      <div class="skills-grid">
+        ${r.skills.map(s => `<div>
+          <div class="skill-cat">${s.category}</div>
+          <div class="skill-items">${s.items?.join(', ')}</div>
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
+  </div>
+  <script>
+    window.addEventListener('load', () => { window.print(); });
+  </script>
+</body>
+</html>`;
+}
+
+// ─── GENERATE BUTTON ─────────────────────────────────────────────────────────
+generateBtn.addEventListener('click', async () => {
+  if (!state.apiKey) {
+    showError('Please set your API key in settings.');
+    return;
+  }
+  if (!state.resumeText || state.resumeText.length < 50) {
     showError('Please upload your resume PDF first.');
     return;
   }
@@ -212,7 +354,7 @@ generateBtn.addEventListener('click', async () => {
   resultSection.classList.add('hidden');
 
   try {
-    const result = await callGeminiAPI(state.resumeText, state.jdText, state.apiKey);
+    const result = await callLLMAPI(state.resumeText, state.jdText, state.apiKey, state.provider);
     displayResult(result);
   } catch (err) {
     showError(`API Error: ${err.message}`);
@@ -221,9 +363,134 @@ generateBtn.addEventListener('click', async () => {
   }
 });
 
-// ─── GEMINI API CALL ─────────────────────────────────────────────────────────
-async function callGeminiAPI(resume, jd, apiKey) {
-  const prompt = `You are an expert ATS resume optimizer and senior technical recruiter.
+// ─── LLM API CALLS ───────────────────────────────────────────────────────────
+async function callLLMAPI(resume, jd, apiKey, provider) {
+  if (provider === 'gemini') return callGemini(resume, jd, apiKey);
+  if (provider === 'openai') return callOpenAI(resume, jd, apiKey);
+  if (provider === 'groq') return callGroq(resume, jd, apiKey);
+  if (provider === 'anthropic') return callAnthropic(resume, jd, apiKey);
+  throw new Error('Unknown provider');
+}
+
+// Gemini
+async function callGemini(resume, jd, apiKey) {
+  const prompt = buildPrompt(resume, jd);
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const cleaned = rawText.replace(/```json|```/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+// OpenAI
+async function callOpenAI(resume, jd, apiKey) {
+  const prompt = buildPrompt(resume, jd);
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'gpt-4-turbo',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_tokens: 8192,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const rawText = data?.choices?.[0]?.message?.content || '';
+  const cleaned = rawText.replace(/```json|```/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+// Groq
+async function callGroq(resume, jd, apiKey) {
+  const prompt = buildPrompt(resume, jd);
+  const response = await fetch(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'mixtral-8x7b-32768',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 8192,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const rawText = data?.choices?.[0]?.message?.content || '';
+  const cleaned = rawText.replace(/```json|```/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+// Anthropic Claude
+async function callAnthropic(resume, jd, apiKey) {
+  const prompt = buildPrompt(resume, jd);
+  const response = await fetch(
+    'https://api.anthropic.com/v1/messages',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-sonnet-20240229',
+        max_tokens: 8192,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const rawText = data?.content?.[0]?.text || '';
+  const cleaned = rawText.replace(/```json|```/g, '').trim();
+  return JSON.parse(cleaned);
+}
+
+// ─── COMMON PROMPT ───────────────────────────────────────────────────────────
+function buildPrompt(resume, jd) {
+  return `You are an expert ATS resume optimizer and senior technical recruiter.
 
 Your job: tailor the given resume for the job description to maximize ATS score.
 
@@ -243,63 +510,55 @@ Return ONLY a valid JSON object. No markdown. No backticks. No text outside JSON
 {
   "ats_score": <integer 0-100>,
   "score_reasoning": "<1-2 sentences explaining the score>",
-  "key_changes": ["<specific change made>", "<specific change made>", "<specific change made>", "<specific change made>", "<specific change made>"],
-  "matched_keywords": ["<exact keyword from JD now in resume>", "<kw2>", "<kw3>", "<kw4>", "<kw5>", "<kw6>"],
+  "key_changes": ["<specific change made>", "<specific change made>", "<specific change made>"],
+  "matched_keywords": ["<exact keyword from JD now in resume>", "<kw2>", "<kw3>"],
   "missing_skills": ["<skill required in JD but genuinely absent from resume>"],
   "resume": {
     "name": "<full name from resume>",
-    "title": "<target job title matching JD terminology>",
+    "title": "<matched job title>",
     "contact": {
-      "email": "<email or empty string>",
-      "phone": "<phone or empty string>",
-      "location": "<city, state or empty string>",
-      "linkedin": "<full linkedin URL or empty string>",
-      "github": "<full github URL or empty string>",
-      "portfolio": "<portfolio URL or empty string>"
+      "email": "<email>",
+      "phone": "<phone>",
+      "location": "<city, state>",
+      "linkedin": "<linkedin url>",
+      "github": "<github url>",
+      "portfolio": "<portfolio url>"
     },
-    "summary": "<2-3 sentence professional summary. Lead with years of experience and core skills matching JD. End with value proposition.>",
+    "summary": "<2-3 sentences tailored to JD>",
     "experience": [
       {
-        "title": "<exact job title>",
-        "company": "<company name>",
-        "location": "<city, country or Remote>",
-        "duration": "<e.g. Jun 2023 – Present>",
-        "bullets": [
-          "<strong action verb + what you did + result/impact with metric>",
-          "<bullet 2>",
-          "<bullet 3>"
-        ]
+        "title": "<job title>",
+        "company": "<company>",
+        "location": "<location>",
+        "duration": "<dates>",
+        "bullets": ["<bullet with JD keywords>"]
       }
     ],
     "projects": [
       {
         "name": "<project name>",
-        "tech": "<comma-separated tech stack>",
-        "link": "<live URL or GitHub URL or empty string>",
-        "bullets": [
-          "<what you built + tech used + impact>",
-          "<bullet 2>"
-        ]
+        "tech": "<tech stack>",
+        "bullets": ["<description with JD keywords>"]
       }
     ],
     "education": [
       {
-        "degree": "<full degree name e.g. B.E. Information Technology>",
-        "institution": "<full university name>",
-        "location": "<city or empty string>",
-        "year": "<e.g. 2022 – 2026>",
-        "grade": "<CGPA X.XX or XX% or empty string>"
+        "degree": "<degree name>",
+        "institution": "<university name>",
+        "location": "<city>",
+        "year": "<graduation year>",
+        "grade": "<CGPA or percentage>"
       }
     ],
     "skills": [
-      { "category": "Languages", "items": ["<skill1>", "<skill2>"] },
-      { "category": "Frameworks & Libraries", "items": ["<skill1>", "<skill2>"] },
-      { "category": "Databases", "items": ["<skill1>"] },
-      { "category": "Cloud & DevOps", "items": ["<skill1>"] },
-      { "category": "Tools", "items": ["<skill1>"] }
+      { "category": "Languages", "items": ["<skill>"] },
+      { "category": "Frameworks", "items": ["<skill>"] },
+      { "category": "Databases", "items": ["<skill>"] },
+      { "category": "Cloud & DevOps", "items": ["<skill>"] },
+      { "category": "Tools", "items": ["<skill>"] }
     ],
-    "certifications": ["<cert name + issuer + year if available>"],
-    "achievements": ["<hackathon/award/recognition with context>"]
+    "certifications": ["<cert name>"],
+    "achievements": ["<achievement>"]
   }
 }
 
@@ -310,40 +569,6 @@ ${resume}
 
 JOB DESCRIPTION:
 ${jd}`;
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 8192,
-        },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    const msg = err?.error?.message || `HTTP ${response.status}`;
-    if (response.status === 400) throw new Error(`API Error: ${msg}`);
-    if (response.status === 401) throw new Error('Unauthorized: Check your API key');
-    if (response.status === 429) throw new Error('Rate limit hit. Wait 60 seconds and try again.');
-    throw new Error(`API Error: ${msg}`);
-  }
-
-  const data = await response.json();
-  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  const cleaned = rawText.replace(/```json|```/g, '').trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    throw new Error('Model returned invalid JSON. Try again.');
-  }
 }
 
 // ─── DISPLAY RESULT ──────────────────────────────────────────────────────────
@@ -380,269 +605,65 @@ function displayResult(result) {
         lines.push('');
       });
     }
-    if (r.skills?.length) {
-      lines.push('── SKILLS ──');
-      r.skills.forEach(s => lines.push(`${s.category}: ${s.items?.join(', ')}`));
-      lines.push('');
-    }
     if (r.education?.length) {
       lines.push('── EDUCATION ──');
-      r.education.forEach(e => lines.push(`${e.degree} — ${e.institution}  |  ${e.year}  |  ${e.grade}`));
+      r.education.forEach(e => {
+        lines.push(`${e.degree} — ${e.institution}${e.location ? ', ' + e.location : ''}  |  ${e.year}`);
+        if (e.grade) lines.push(`Grade: ${e.grade}`);
+        lines.push('');
+      });
+    }
+    if (r.skills?.length) {
+      lines.push('── SKILLS ──');
+      r.skills.forEach(s => {
+        lines.push(`${s.category}: ${s.items?.join(', ')}`);
+      });
       lines.push('');
     }
     if (r.certifications?.length) { lines.push('── CERTIFICATIONS ──'); r.certifications.forEach(c => lines.push(`• ${c}`)); lines.push(''); }
     if (r.achievements?.length) { lines.push('── ACHIEVEMENTS ──'); r.achievements.forEach(a => lines.push(`• ${a}`)); }
     resultText.textContent = lines.join('\n');
-  } else {
-    resultText.textContent = 'No resume data returned. Try again.';
   }
 
-  analysisCards.innerHTML = '';
-  if (result.key_changes?.length) analysisCards.appendChild(createCard('✦ Key Changes Made', 'green', result.key_changes, 'list'));
-  if (result.matched_keywords?.length) analysisCards.appendChild(createCard('⚡ Injected Keywords', 'orange', result.matched_keywords, 'chips'));
-  if (result.missing_skills?.length) analysisCards.appendChild(createCard('⚠ Skills to Acquire', 'yellow', result.missing_skills, 'list'));
-  if (result.score_reasoning) {
-    const card = document.createElement('div');
-    card.className = 'analysis-card';
-    card.innerHTML = `<div class="card-title" style="color:var(--text2)">📊 Score Reasoning</div><p style="font-size:12px;color:var(--text2);line-height:1.5">${result.score_reasoning}</p>`;
-    analysisCards.appendChild(card);
+  if (result.key_changes?.length) {
+    const cardsHtml = `
+      <div class="analysis-card">
+        <div class="card-title">Key Changes</div>
+        <ul style="margin-left: 14px; font-size: 12px;">
+          ${result.key_changes.map(c => `<li style="margin-bottom: 6px;">${c}</li>`).join('')}
+        </ul>
+      </div>
+      <div class="analysis-card">
+        <div class="card-title">Matched Keywords</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px;">
+          ${result.matched_keywords?.map(kw => `<span style="background: #FFE5D9; color: #FF4D26; padding: 4px 8px; border-radius: 3px;">${kw}</span>`).join('')}
+        </div>
+      </div>
+      ${result.missing_skills?.length ? `<div class="analysis-card">
+        <div class="card-title">Missing Skills (Learn Optional)</div>
+        <ul style="margin-left: 14px; font-size: 12px;">
+          ${result.missing_skills.map(s => `<li style="margin-bottom: 4px; color: #666;">${s}</li>`).join('')}
+        </ul>
+      </div>` : ''}
+    `;
+    analysisCards.innerHTML = cardsHtml;
   }
 
   resultSection.classList.remove('hidden');
-  resultSection.scrollIntoView({ behavior: 'smooth' });
-}
-
-function createCard(title, color, items, type) {
-  const card = document.createElement('div');
-  card.className = 'analysis-card';
-  const titleEl = document.createElement('div');
-  titleEl.className = `card-title ${color}`;
-  titleEl.textContent = title;
-  card.appendChild(titleEl);
-
-  if (type === 'list') {
-    const ul = document.createElement('ul');
-    ul.className = 'card-list';
-    items.forEach(item => { const li = document.createElement('li'); li.textContent = item; ul.appendChild(li); });
-    card.appendChild(ul);
-  } else if (type === 'chips') {
-    const chips = document.createElement('div');
-    chips.className = 'keyword-chips';
-    items.forEach(kw => { const chip = document.createElement('span'); chip.className = 'keyword-chip'; chip.textContent = kw; chips.appendChild(chip); });
-    card.appendChild(chips);
-  }
-  return card;
-}
-
-// ─── RESULT TABS ─────────────────────────────────────────────────────────────
-resultTabs.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const tab = btn.dataset.rtab;
-    resultTabs.forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    resumePane.classList.toggle('hidden', tab !== 'resume');
-    analysisPane.classList.toggle('hidden', tab !== 'analysis');
-  });
-});
-
-// ─── COPY BUTTON ─────────────────────────────────────────────────────────────
-copyBtn.addEventListener('click', async () => {
-  const text = resultText.textContent;
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-    copyBtn.textContent = '✓ Copied!';
-    copyBtn.classList.add('copied');
-    setTimeout(() => {
-      copyBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
-      copyBtn.classList.remove('copied');
-    }, 2000);
-  } catch { copyBtn.textContent = 'Copy failed'; }
-});
-
-// ─── EXPORT PDF ──────────────────────────────────────────────────────────────
-exportPdfBtn.addEventListener('click', () => {
-  if (!_lastStructuredResume) return;
-  const html = buildPrintHTML(_lastStructuredResume);
-  const blob = new Blob([html], { type: 'text/html' });
-  const url  = URL.createObjectURL(blob);
-  chrome.tabs.create({ url }, (tab) => {
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => window.addEventListener('load', () => setTimeout(() => window.print(), 900)),
-    });
-  });
-});
-
-// ─── PDF HTML BUILDER ────────────────────────────────────────────────────────
-function buildPrintHTML(resumeData) {
-  const r = resumeData?.resume;
-  if (!r) return '<html><body><p>No resume data.</p></body></html>';
-
-  const c = r.contact || {};
-  const contactItems = [
-    c.email     ? `<a href="mailto:${c.email}">${c.email}</a>` : '',
-    c.phone     ? c.phone : '',
-    c.location  ? c.location : '',
-    c.linkedin  ? `<a href="${c.linkedin}">LinkedIn</a>` : '',
-    c.github    ? `<a href="${c.github}">GitHub</a>` : '',
-    c.portfolio ? `<a href="${c.portfolio}">Portfolio</a>` : '',
-  ].filter(Boolean);
-
-  const expHTML = (r.experience || []).map(e => `
-    <div class="entry">
-      <div class="entry-header">
-        <div class="entry-left">
-          <span class="entry-title">${e.title || ''}</span>
-          <span class="entry-sub">${[e.company, e.location].filter(Boolean).join(', ')}</span>
-        </div>
-        <div class="entry-right">${e.duration || ''}</div>
-      </div>
-      <ul class="bullets">${(e.bullets || []).map(b => `<li>${b}</li>`).join('')}</ul>
-    </div>`).join('');
-
-  const projHTML = (r.projects || []).map(p => `
-    <div class="entry">
-      <div class="entry-header">
-        <div class="entry-left">
-          <span class="entry-title">${p.name || ''}${p.link ? ` <a href="${p.link}" class="proj-link">↗</a>` : ''}</span>
-          ${p.tech ? `<span class="entry-tech">${p.tech}</span>` : ''}
-        </div>
-      </div>
-      <ul class="bullets">${(p.bullets || []).map(b => `<li>${b}</li>`).join('')}</ul>
-    </div>`).join('');
-
-  const eduHTML = (r.education || []).map(e => `
-    <div class="entry">
-      <div class="entry-header">
-        <div class="entry-left">
-          <span class="entry-title">${e.degree || ''}</span>
-          <span class="entry-sub">${[e.institution, e.location].filter(Boolean).join(', ')}</span>
-        </div>
-        <div class="entry-right">${[e.year, e.grade].filter(Boolean).join('  |  ')}</div>
-      </div>
-    </div>`).join('');
-
-  const skillsHTML = (r.skills || []).map(s => `
-    <div class="skill-row">
-      <span class="skill-cat">${s.category}:</span>
-      <span class="skill-items">${(s.items || []).join(', ')}</span>
-    </div>`).join('');
-
-  const certsHTML = (r.certifications || []).map(c => `<li>${c}</li>`).join('');
-  const achHTML   = (r.achievements   || []).map(a => `<li>${a}</li>`).join('');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <title>${r.name || 'Resume'} — ResumeForge AI</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-
-    body {
-      font-family: 'Inter', Arial, sans-serif;
-      font-size: 10pt;
-      color: #1a1a1a;
-      background: #fff;
-      max-width: 210mm;
-      margin: 0 auto;
-      padding: 20mm 18mm;
-      line-height: 1.45;
-    }
-
-    .resume-header { text-align:center; margin-bottom:14px; }
-    .resume-name { font-size:22pt; font-weight:700; letter-spacing:-0.5px; color:#111; line-height:1.1; }
-    .resume-title { font-size:11pt; font-weight:500; color:#555; margin-top:3px; margin-bottom:8px; }
-    .contact-line { font-size:9pt; color:#555; display:flex; flex-wrap:wrap; justify-content:center; gap:4px 14px; }
-    .contact-line a { color:#555; text-decoration:none; }
-
-    .divider { border:none; border-top:1.5px solid #CC3300; margin:10px 0 12px; }
-
-    .section { margin-bottom:14px; }
-    .section-title {
-      font-size:9pt; font-weight:700; text-transform:uppercase;
-      letter-spacing:0.12em; color:#CC3300;
-      border-bottom:1px solid #CC3300; padding-bottom:2px; margin-bottom:8px;
-    }
-
-    .summary-text { font-size:10pt; color:#333; line-height:1.55; }
-
-    .entry { margin-bottom:9px; }
-    .entry-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:3px; }
-    .entry-left { display:flex; flex-direction:column; gap:1px; }
-    .entry-title { font-size:10.5pt; font-weight:700; color:#111; }
-    .entry-sub { font-size:9.5pt; color:#555; font-style:italic; }
-    .entry-tech { font-size:9pt; color:#777; }
-    .entry-right { font-size:9.5pt; color:#555; white-space:nowrap; text-align:right; flex-shrink:0; }
-    .proj-link { font-size:9pt; color:#CC3300; text-decoration:none; margin-left:4px; }
-
-    .bullets { list-style:none; padding-left:12px; }
-    .bullets li { position:relative; padding-left:12px; font-size:9.5pt; color:#333; line-height:1.45; margin-bottom:2px; }
-    .bullets li::before { content:'▪'; position:absolute; left:0; color:#CC3300; font-size:8pt; top:1px; }
-
-    .skill-row { display:flex; gap:6px; margin-bottom:3px; font-size:9.5pt; line-height:1.4; }
-    .skill-cat { font-weight:700; color:#111; white-space:nowrap; min-width:90px; }
-    .skill-items { color:#333; }
-
-    .toolbar {
-      position:fixed; top:0; left:0; right:0; background:#111;
-      padding:10px 20px; display:flex; align-items:center;
-      justify-content:space-between; z-index:999;
-      box-shadow:0 2px 16px rgba(0,0,0,0.4);
-    }
-    .toolbar-title { color:#fff; font-size:13px; font-weight:600; }
-    .toolbar-title span { color:#FF4D26; }
-    .toolbar-btns { display:flex; gap:10px; }
-    .btn-save { background:#FF4D26; color:#fff; border:none; border-radius:6px; padding:7px 18px; font-size:12px; font-weight:700; cursor:pointer; }
-    .btn-save:hover { opacity:0.88; }
-    .btn-close { background:#222; color:#bbb; border:1px solid #333; border-radius:6px; padding:7px 14px; font-size:12px; cursor:pointer; }
-    .screen-offset { height:52px; }
-
-    @media print {
-      .toolbar, .screen-offset { display:none; }
-      body { padding:14mm 12mm; }
-      @page { size:A4; margin:12mm 10mm; }
-      .section, .entry { page-break-inside:avoid; }
-    }
-  </style>
-</head>
-<body>
-
-  <div class="toolbar">
-    <div class="toolbar-title">ResumeForge <span>AI</span></div>
-    <div class="toolbar-btns">
-      <button class="btn-close" onclick="window.close()">✕ Close</button>
-      <button class="btn-save" onclick="window.print()">⬇ Save as PDF</button>
-    </div>
-  </div>
-  <div class="screen-offset"></div>
-
-  <div class="resume-header">
-    <div class="resume-name">${r.name || ''}</div>
-    ${r.title ? `<div class="resume-title">${r.title}</div>` : ''}
-    <div class="contact-line">${contactItems.join('<span>·</span>')}</div>
-  </div>
-  <hr class="divider"/>
-
-  ${r.summary ? `<div class="section"><div class="section-title">Professional Summary</div><p class="summary-text">${r.summary}</p></div>` : ''}
-  ${expHTML   ? `<div class="section"><div class="section-title">Experience</div>${expHTML}</div>` : ''}
-  ${projHTML  ? `<div class="section"><div class="section-title">Projects</div>${projHTML}</div>` : ''}
-  ${skillsHTML? `<div class="section"><div class="section-title">Technical Skills</div>${skillsHTML}</div>` : ''}
-  ${eduHTML   ? `<div class="section"><div class="section-title">Education</div>${eduHTML}</div>` : ''}
-  ${certsHTML ? `<div class="section"><div class="section-title">Certifications</div><ul class="bullets">${certsHTML}</ul></div>` : ''}
-  ${achHTML   ? `<div class="section"><div class="section-title">Achievements</div><ul class="bullets">${achHTML}</ul></div>` : ''}
-
-</body>
-</html>`;
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
-function setLoading(on) {
-  generateBtn.disabled = on;
-  btnContent.style.display = on ? 'none' : 'flex';
-  btnLoader.classList.toggle('hidden', !on);
+function showError(msg) {
+  if (msg) {
+    errorMsg.textContent = msg;
+    errorMsg.classList.remove('hidden');
+  } else {
+    errorMsg.classList.add('hidden');
+  }
 }
-function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.remove('hidden'); }
-function hideError() { errorMsg.classList.add('hidden'); errorMsg.textContent = ''; }
+
+function setLoading(isLoading) {
+  generateBtn.disabled = isLoading;
+  btnContent.classList.toggle('hidden', isLoading);
+  btnLoader.classList.toggle('hidden', !isLoading);
+}

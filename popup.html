@@ -33,15 +33,63 @@
 
   <!-- ── API KEY PANEL ── -->
   <div class="api-panel" id="apiPanel">
-    <label class="field-label">
-      Gemini API Key —
-      <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent);text-decoration:none;">Get free key ↗</a>
-    </label>
-    <div class="api-input-row">
-      <input type="password" id="apiKey" placeholder="AIza..." class="api-input" />
-      <button class="save-btn" id="saveKey">Save</button>
+    <label class="field-label">LLM Provider</label>
+    <select id="providerSelect" class="api-input" style="margin-bottom: 12px;">
+      <option value="gemini">Google Gemini (Free Tier)</option>
+      <option value="openai">OpenAI (GPT-4, GPT-3.5)</option>
+      <option value="groq">Groq (Free Tier)</option>
+      <option value="anthropic">Anthropic Claude (API)</option>
+    </select>
+
+    <!-- Gemini Key Input -->
+    <div class="provider-input" id="geminiInput">
+      <label class="field-label">
+        Gemini API Key —
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent);text-decoration:none;">Get free key ↗</a>
+      </label>
+      <div class="api-input-row">
+        <input type="password" id="apiKeyGemini" placeholder="AIza..." class="api-input" />
+      </div>
+      <p class="hint-text">🆓 Free tier available — no credit card needed.</p>
     </div>
-    <p class="hint-text">🆓 Gemini Flash is <strong style="color:var(--green)">completely free</strong> — no credit card needed.</p>
+
+    <!-- OpenAI Key Input -->
+    <div class="provider-input hidden" id="openaiInput">
+      <label class="field-label">
+        OpenAI API Key —
+        <a href="https://platform.openai.com/api/keys" target="_blank" style="color:var(--accent);text-decoration:none;">Get key ↗</a>
+      </label>
+      <div class="api-input-row">
+        <input type="password" id="apiKeyOpenai" placeholder="sk-..." class="api-input" />
+      </div>
+      <p class="hint-text">Requires valid OpenAI API account and credit.</p>
+    </div>
+
+    <!-- Groq Key Input -->
+    <div class="provider-input hidden" id="groqInput">
+      <label class="field-label">
+        Groq API Key —
+        <a href="https://console.groq.com/keys" target="_blank" style="color:var(--accent);text-decoration:none;">Get free key ↗</a>
+      </label>
+      <div class="api-input-row">
+        <input type="password" id="apiKeyGroq" placeholder="gsk_..." class="api-input" />
+      </div>
+      <p class="hint-text">🆓 Free tier available — supports Llama, Mixtral models.</p>
+    </div>
+
+    <!-- Anthropic Key Input -->
+    <div class="provider-input hidden" id="anthropicInput">
+      <label class="field-label">
+        Anthropic API Key —
+        <a href="https://console.anthropic.com/account/keys" target="_blank" style="color:var(--accent);text-decoration:none;">Get key ↗</a>
+      </label>
+      <div class="api-input-row">
+        <input type="password" id="apiKeyAnthropic" placeholder="sk-ant-..." class="api-input" />
+      </div>
+      <p class="hint-text">Claude models via API.</p>
+    </div>
+
+    <button class="save-btn" id="saveKey" style="width: 100%; margin-top: 12px;">Save API Key</button>
     <div class="api-status" id="apiStatus"></div>
   </div>
 
