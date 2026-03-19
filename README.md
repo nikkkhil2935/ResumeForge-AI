@@ -33,8 +33,8 @@ Powered by Groq + LLaMA 3.3 70B. Beat the ATS. Land more interviews.
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/nikkkhil2935/resumeforge-ai.git
-cd resumeforge-ai
+git clone https://github.com/nikkkhil2935/ResumeForge-AI.git
+cd ResumeForge-AI
 ```
 
 ### 2. Add PDF.js (required — not included due to file size)
@@ -56,6 +56,14 @@ chrome://extensions → Enable Developer Mode → Load Unpacked → select this 
 ⚙ icon in popup → paste gsk_... key → Save
 Get one free at: https://console.groq.com
 ```
+
+---
+
+## 📥 PDF Export Notes
+
+- Export triggers a direct `.pdf` download from the extension popup.
+- If no file appears, click Chrome's blocked downloads icon in the address bar and allow downloads.
+- If browser policy blocks direct downloads, ResumeForge opens a print preview fallback where you can use **Save as PDF**.
 
 ---
 

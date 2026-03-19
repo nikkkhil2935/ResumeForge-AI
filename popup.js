@@ -446,13 +446,28 @@ exportPdfBtn.addEventListener('click', async () => {
   if (!text) return;
 
   try {
+    exportPdfBtn.disabled = true;
     await generatePDF(text, state.resumeText);
+    exportPdfBtn.textContent = '✓ Downloaded';
+    setTimeout(() => {
+      exportPdfBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg> Export PDF`;
+      exportPdfBtn.disabled = false;
+    }, 1500);
   } catch (err) {
+    exportPdfBtn.disabled = false;
     showError('PDF generation failed: ' + err.message);
   }
 });
 
 async function generatePDF(resumeText, originalResumeText = '') {
+  try {
+    await generatePDFWithJsPDF(resumeText);
+    return;
+  } catch {
+    // Fall through to print preview fallback.
+  }
+
+  // Fallback: open formatted preview page and use browser "Save as PDF".
   const printHtml = buildPrintHTML(resumeText, originalResumeText);
   const printBlob = new Blob([printHtml], { type: 'text/html' });
   const printUrl = URL.createObjectURL(printBlob);
@@ -516,7 +531,15 @@ async function generatePDFWithJsPDF(resumeText) {
     }
   }
 
-  doc.save('Tailored_Resume.pdf');
+  const pdfBlob = doc.output('blob');
+  const downloadUrl = URL.createObjectURL(pdfBlob);
+  const link = document.createElement('a');
+  link.href = downloadUrl;
+  link.download = 'Tailored_Resume.pdf';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(downloadUrl), 10_000);
 }
 
 
