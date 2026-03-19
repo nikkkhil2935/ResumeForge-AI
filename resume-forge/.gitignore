@@ -1,0 +1,29 @@
+# ── OS ──────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor ──────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ── PDF.js (user must add manually) ─────
+lib/pdf.mjs
+lib/pdf.worker.mjs
+lib/pdf.mjs.map
+lib/pdf.worker.mjs.map
+
+# ── Secrets ──────────────────────────────
+*.env
+.env*
+secrets.json
+
+# ── Build / Release ──────────────────────
+*.zip
+*.crx
+*.pem
+dist/

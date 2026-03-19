@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "ResumeForge AI",
+  "version": "1.0.0",
+  "description": "Tailor your resume to any job description with AI. Beat the ATS.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://api.groq.com/*"],
+"action": {
+    "default_popup": "popup.html",
+    "default_title": "ResumeForge AI"
+  },
+
+
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+"background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["lib/pdf.worker.mjs", "lib/jspdf.umd.min.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
