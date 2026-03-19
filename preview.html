@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Resume Preview</title>
+  <title>Resume</title>
   <style>
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: "Calibri", "Segoe UI", Arial, sans-serif;
+      font-size: 12px;
       color: #111;
       background: #eef0f3;
     }
@@ -49,12 +50,12 @@
       margin-bottom: 12px;
       padding-bottom: 10px;
     }
-    .name { font-size: 25px; font-weight: 700; color: #000; }
-    .title { font-size: 14px; color: #222; margin-top: 4px; }
-    .contact { font-size: 11px; color: #222; margin-top: 7px; }
+    .name { font-size: 28px; font-weight: 700; color: #000; }
+    .title { font-size: 16px; color: #222; margin-top: 4px; }
+    .contact { font-size: 12px; color: #222; margin-top: 7px; }
     .section { margin-top: 14px; }
     .section-title {
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 700;
       letter-spacing: 0.03em;
       text-transform: uppercase;
@@ -64,15 +65,15 @@
       padding-bottom: 3px;
     }
     .entry { margin-bottom: 10px; }
-    .entry-header { font-size: 12px; font-weight: 700; color: #000; }
-    .entry-sub { font-size: 11px; color: #222; margin-top: 2px; }
-    .entry-bullets { margin: 5px 0 0 16px; font-size: 11px; color: #111; }
+    .entry-header { font-size: 13px; font-weight: 700; color: #000; }
+    .entry-sub { font-size: 12px; color: #222; margin-top: 2px; }
+    .entry-bullets { margin: 5px 0 0 16px; font-size: 12px; color: #111; }
     .entry-bullets li { margin-bottom: 3px; }
     .skills-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
-      font-size: 11px;
+      font-size: 12px;
     }
     .skill-cat { font-weight: 700; color: #111; margin-bottom: 3px; }
     .empty {
@@ -114,7 +115,7 @@
 <body>
   <div class="toolbar">
     <button id="downloadPdfBtn">Download PDF</button>
-    <button id="closeBtn" class="secondary">Close Preview</button>
+    <button id="closeBtn" class="secondary">Close</button>
   </div>
 
   <div id="root"></div>

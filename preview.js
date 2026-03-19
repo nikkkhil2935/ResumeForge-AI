@@ -71,7 +71,7 @@ async function initPreview() {
   const resume = data.previewResumeData;
 
   if (!resume || Object.keys(resume).length === 0) {
-    root.innerHTML = '<div class="empty">No resume data found. Generate resume again and click Preview & Download PDF.</div>';
+    root.innerHTML = '<div class="empty">No resume data found. Generate resume again and click Download PDF.</div>';
     return;
   }
 
