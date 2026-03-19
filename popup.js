@@ -64,8 +64,8 @@ settingsToggle.addEventListener('click', () => apiPanel.classList.toggle('visibl
 
 saveKeyBtn.addEventListener('click', async () => {
   const key = apiKeyInput.value.trim();
-  if (!key.startsWith('AIza')) {
-    apiStatus.textContent = '✗ Gemini key must start with AIza';
+  if (!key) {
+    apiStatus.textContent = '✗ Enter an API key';
     apiStatus.className = 'api-status err';
     return;
   }
@@ -330,9 +330,10 @@ ${jd}`;
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     const msg = err?.error?.message || `HTTP ${response.status}`;
-    if (response.status === 400) throw new Error('Invalid API key. Check your Gemini key at aistudio.google.com');
+    if (response.status === 400) throw new Error(`API Error: ${msg}`);
+    if (response.status === 401) throw new Error('Unauthorized: Check your API key');
     if (response.status === 429) throw new Error('Rate limit hit. Wait 60 seconds and try again.');
-    throw new Error(msg);
+    throw new Error(`API Error: ${msg}`);
   }
 
   const data = await response.json();
