@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resume Preview</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Calibri", "Segoe UI", Arial, sans-serif;
+      color: #111;
+      background: #eef0f3;
+    }
+    .toolbar {
+      max-width: 210mm;
+      margin: 14px auto 10px;
+      display: flex;
+      gap: 10px;
+      padding: 0 8px;
+    }
+    .toolbar button {
+      border: 1px solid #111;
+      background: #111;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 9px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .toolbar button.secondary {
+      background: #fff;
+      color: #111;
+    }
+    .paper {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto 24px;
+      padding: 14mm 12mm;
+      background: #fff;
+      border: 1px solid #d9d9d9;
+      border-radius: 10px;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
+      line-height: 1.45;
+    }
+    .header {
+      border-bottom: 2px solid #111;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+    }
+    .name { font-size: 25px; font-weight: 700; color: #000; }
+    .title { font-size: 14px; color: #222; margin-top: 4px; }
+    .contact { font-size: 11px; color: #222; margin-top: 7px; }
+    .section { margin-top: 14px; }
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: #111;
+      border-bottom: 1px solid #111;
+      margin-bottom: 7px;
+      padding-bottom: 3px;
+    }
+    .entry { margin-bottom: 10px; }
+    .entry-header { font-size: 12px; font-weight: 700; color: #000; }
+    .entry-sub { font-size: 11px; color: #222; margin-top: 2px; }
+    .entry-bullets { margin: 5px 0 0 16px; font-size: 11px; color: #111; }
+    .entry-bullets li { margin-bottom: 3px; }
+    .skills-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      font-size: 11px;
+    }
+    .skill-cat { font-weight: 700; color: #111; margin-bottom: 3px; }
+    .empty {
+      max-width: 210mm;
+      margin: 30px auto;
+      padding: 16px;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+
+    @media print {
+      html, body {
+        width: 210mm;
+        background: #fff;
+      }
+      * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .toolbar { display: none; }
+      .paper {
+        width: auto;
+        min-height: auto;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="downloadPdfBtn">Download PDF</button>
+    <button id="closeBtn" class="secondary">Close Preview</button>
+  </div>
+
+  <div id="root"></div>
+
+  <script src="preview.js"></script>
+</body>
+</html>

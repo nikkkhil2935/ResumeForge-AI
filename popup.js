@@ -252,10 +252,9 @@ exportPdfBtn.addEventListener('click', async () => {
     return;
   }
   try {
-    const html = buildPrintHTML(_lastStructuredResume.resume, chrome.runtime.getURL(''));
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    await chrome.tabs.create({ url, active: true });
+    await chrome.storage.local.set({ previewResumeData: _lastStructuredResume.resume || {} });
+    const previewUrl = chrome.runtime.getURL('preview.html');
+    await chrome.tabs.create({ url: previewUrl, active: true });
     setTimeout(() => { exportPdfBtn.textContent = '✓ Preview Opened'; }, 300);
     setTimeout(() => { exportPdfBtn.textContent = 'Export PDF'; }, 2500);
   } catch (err) {
